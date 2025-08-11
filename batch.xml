@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:batch="http://www.springframework.org/schema/batch"
+    xsi:schemaLocation="http://www.springframework.org/schema/beans
+	http://www.springframework.org/schema/beans/spring-beans-4.0.xsd
+	http://www.springframework.org/schema/batch
+	http://www.springframework.org/schema/batch/spring-batch-3.0.xsd">
+
+    <import resource="classpath:batch-gce-common-skippolicy.xml" />
+
+    <import resource="classpath:batch-listener-tec-batch.xml" />
+
+    <!-- ================================================== Declaration du job ================================================== -->
+    <batch:job id="compenserAvantRecouvrement" job-repository="jobRepository" restartable="true">
+
+        <!-- Validator -->
+        <batch:validator ref="parametersValidatorComposite" />
+
+        <!-- 1er step -->
+        <batch:step id="B-10compAvtRec.M">
+            <batch:partition step="B-10compAvtRec.W" partitioner="partitionerCAR" handler="msgChannelBC10PartitionHandler">
+            </batch:partition>
+        </batch:step>
+    </batch:job>
+
+    <!-- ================================================== Validators ================================================ -->
+    <bean id="parametersValidatorComposite" class="org.springframework.batch.core.job.CompositeJobParametersValidator">
+        <property name="validators">
+            <list>
+                <ref bean="parametersValidatorKeys" />
+                <ref bean="parametersDirValidatorDir" />
+                <ref bean="parametersFormatValidatorDate" />
+            </list>
+        </property>
+    </bean>
+
+    <bean id="parametersValidatorKeys" class="org.springframework.batch.core.job.DefaultJobParametersValidator">
+        <property name="requiredKeys">
+            <array>
+                <value>indir</value>
+                <value>workdir</value>
+                <value>outdir</value>
+                <value>dateTraitement</value>
+                <value>commit_10</value>
+                <value>fetch_size_10</value>
+                <value>max_erreurs_10</value>
+                <value>nb_partitions_10</value>
+                <value>max_retry_10</value>
+            </array>
+        </property>
+    </bean>
+
+    <bean id="parametersDirValidatorDir" class="fr.dsirc.gce.batch.commons.validator.JobParametersDirValidator">
+        <property name="dirParameters">
+            <!-- Liste des paramètres obligatoires dont la valeur est un répertoire -->
+            <list>
+                <value>outdir</value>
+            </list>
+        </property>
+    </bean>
+
+    <bean id="parametersFormatValidatorDate" class="fr.dsirc.gce.batch.commons.validator.JobParametersFormatValidator">
+        <property name="paramFormats">
+            <map>
+                <entry key="dateTraitement" value="[0-9]{2}\/[0-9]{2}\/[0-9]{4}" />
+            </map>
+        </property>
+    </bean>
+
+    <!-- ================================================== Job ================================================ -->
+
+
+    <batch:step id="B-10compAvtRec.W">
+        <batch:tasklet transaction-manager="transactionManager">
+            <batch:chunk reader="readerCAR" processor="processorGenererMvtsCompCAR" writer="hibernateWriter"
+                commit-interval="#{jobParameters['commit_10']}">
+                <batch:skip-policy>
+                    <ref bean="gceSkipPolicy" />
+                </batch:skip-policy>
+            </batch:chunk>
+            <batch:listeners>
+                <!-- <batch:listener ref="defaultListenerCAR" /> -->
+                <batch:listener ref="skipListener" />
+            </batch:listeners>
+        </batch:tasklet>
+    </batch:step>
+
+    <!-- ================================================== Readers ================================================ -->
+    <bean id="readerCAR" class="fr.dsirc.gce.batch.commons.reader.BufferedReader" scope="step">
+        <property name="paramKey" value="ids" />
+        <property name="queryName" value="ListConstatCreance" />
+        <property name="bufferSize" value="#{jobParameters['buffer_size'] == null ? jobParameters['commit_10']:jobParameters['buffer_size']}" />
+        <property name="delegateReader" ref="fileReaderCAR" />
+    </bean>
+
+    <bean id="fileReaderCAR" class=" org.springframework.batch.item.file.FlatFileItemReader" scope="step">
+
+        <property name="lineMapper">
+            <bean class="org.springframework.batch.item.file.mapping.DefaultLineMapper">
+                <property name="lineTokenizer">
+                    <bean class="fr.dsirc.fmk.batch.reader.mapper.EnhancedDelimitedLineTokenizer">
+                        <property name="delimiter" value=";" />
+                    </bean>
+                </property>
+                <property name="fieldSetMapper">
+                    <bean class="fr.dsirc.gce.batch.commons.mapper.ListOfLongFieldSetMapper" />
+                </property>
+            </bean>
+        </property>
+        <property name="comments" value="#" />
+        <property name="encoding" value="ISO-8859-1" />
+        <property name="saveState" value="false" />
+        <property name="resource" value="file:#{stepExecutionContext[FILE_NAME]}" />
+    </bean>
+
+    <!-- ================================================== Processors ================================================ -->
+    <bean id="processorGenererMvtsCompCAR" class="fr.dsirc.gce.batch.car.processor.CARGenererMvtsCompProcessor" scope="step" />
+
+    <!-- ================================================== Writers ================================================ -->
+    <bean id="hibernateWriter" class="fr.dsirc.fmk.batch.writer.CustomJpaItemWriter" scope="step" />
+
+    <!-- ================================================== Listeners ================================================ -->
+
+    <!-- =========================== Partitionners =========================================================== -->
+    <bean id="partitionerCAR" class="fr.dsirc.gce.batch.commons.partitioner.JdbcToFilePartitioner" scope="step">
+        <property name="workDirStep" value="file:#{jobExecutionContext['B-10compAvtRec.M']}" />
+        <property name="nbItemMax" value="#{jobParameters['limit_max_item']}" />
+        <property name="fetchSize" value="#{jobParameters['fetch_size_10']}" />
+        <property name="customGridSize" value="#{jobParameters['nb_partitions_10']}" />
+        <property name="namedNativeQueryNameCustom" value="sqlPartitionnementCAR" />
+    </bean>
+
+    <!-- ================================================== Tasklet ================================================ -->
+
+</beans>

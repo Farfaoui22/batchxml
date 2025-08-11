@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<entity-mappings version="1.0"
+                 xmlns="http://java.sun.com/xml/ns/persistence/orm"
+                 xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                 xsi:schemaLocation="http://java.sun.com/xml/ns/persistence/orm http://java.sun.com/xml/ns/persistence/orm_1_0.xsd">
+    <description>GCE ORM</description>
+    <package>entity</package>
+
+    <named-query name="ListConstatCreance">
+        <query>
+            <![CDATA[SELECT cc FROM Creance cc WHERE cc.idTechnique in :ids ]]>
+        </query>
+    </named-query>
+    <named-native-query name="sqlPartitionnementCAR">
+        <!-- Le groupe By c'est pour éviter de faire des select pour des creances qui ont les memes criteres -->
+        <query>
+        		<![CDATA[SELECT string_agg(DISTINCT CAST(creance.it_creance AS text), ';') 
+                    FROM T_CPT_C_CREANCE creance 
+                    INNER JOIN T_CPT_C_CONSTAT_SOLDE constatsolde ON creance.it_creance = constatsolde.it_constat_solde
+                    WHERE constatsolde.mt_solde < -0.008 AND constatsolde.mt_debit+constatsolde.mt_credit_algmt_gnrx < -0.008 AND constatsolde.co_type_constat_solde = 'COT' AND constatsolde.co_nature_constat_solde in ('DEC','DTP','DER')
+                    GROUP BY  constatsolde.id_rcu_etab, creance.exercice_afference, constatsolde.it_mir
+     ]]></query>
+    </named-native-query>
+
+</entity-mappings>

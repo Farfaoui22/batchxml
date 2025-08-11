@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:batch="http://www.springframework.org/schema/batch" xmlns:context="http://www.springframework.org/schema/context"
+    xmlns:tx="http://www.springframework.org/schema/tx" xmlns:int="http://www.springframework.org/schema/integration"
+    xmlns:int-jms="http://www.springframework.org/schema/integration/jms" xmlns:task="http://www.springframework.org/schema/task"
+    xmlns:jee="http://www.springframework.org/schema/jee"
+    xsi:schemaLocation="http://www.springframework.org/schema/beans
+	http://www.springframework.org/schema/beans/spring-beans-4.0.xsd
+	http://www.springframework.org/schema/batch
+	http://www.springframework.org/schema/batch/spring-batch-3.0.xsd
+	http://www.springframework.org/schema/tx
+    http://www.springframework.org/schema/tx/spring-tx-4.0.xsd
+    http://www.springframework.org/schema/context
+    http://www.springframework.org/schema/context/spring-context-4.0.xsd
+    http://www.springframework.org/schema/integration
+    http://www.springframework.org/schema/integration/spring-integration-4.0.xsd
+	http://www.springframework.org/schema/integration/jms
+	http://www.springframework.org/schema/integration/jms/spring-integration-jms-4.0.xsd
+	http://www.springframework.org/schema/task
+	http://www.springframework.org/schema/task/spring-task-4.0.xsd
+	http://www.springframework.org/schema/jee
+	http://www.springframework.org/schema/jee/spring-jee.xsd">
+
+
+    <task:executor id="gatewayTaskExecutor" pool-size="#{thread_master}" />
+
+    <beans profile="worker,remoteWorker">
+        <int-jms:inbound-gateway request-channel="worker" request-destination-name="requestQueue"
+            concurrent-consumers="#{thread_worker}" auto-startup="true" destination-resolver="destinationResolver" cache-level="0" />
+    </beans>
+
+    <beans>
+        <bean id="destinationResolver" class="fr.dsirc.fmk.commons.resolver.SpringDynamicDestinationResolver" />
+        <jee:jndi-lookup id="requestQueue" jndi-name="jms/queue/request" resource-ref="true" />
+        <jee:jndi-lookup id="replyQueue" jndi-name="jms/queue/reply" resource-ref="true" />
+
+        <int:channel id="requestChannel">
+            <int:queue />
+        </int:channel>
+        <int:channel id="replyChannel" />
+
+        <bean id="msgChannelBC10PartitionHandler" class="fr.dsirc.fmk.batch.integration.CustomMessageChannelPartitionHandler">
+            <property name="stepName" value="B-10compAvtRec.W" />
+            <property name="messagingOperations">
+                <bean class="org.springframework.integration.core.MessagingTemplate">
+                    <property name="defaultChannel" ref="requestChannel" />
+                    <property name="receiveTimeout" value="#{handlertimeout}" />
+                </bean>
+            </property>
+        </bean>
+
+        <int-jms:outbound-gateway request-channel="requestChannel" request-destination-name="requestQueue"
+            reply-channel="replyChannel" reply-destination-name="replyQueue" receive-timeout="#{gatewaytimeout}"
+            auto-startup="#{systemProperties['autostartOutbound']}" connection-factory="connectionFactory" destination-resolver="destinationResolver">
+            <int:poller fixed-rate="1000" max-messages-per-poll="-1" task-executor="gatewayTaskExecutor">
+            </int:poller>
+        </int-jms:outbound-gateway>
+
+        <int:aggregator ref="msgChannelBC10PartitionHandler" input-channel="replyChannel" />
+
+    </beans>
+
+
+</beans>
